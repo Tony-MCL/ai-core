@@ -1,0 +1,13 @@
+{
+  "name": "petey",
+  "displayName": "Petey (Code + Structure)",
+  "mode": "strict",
+  "contracts": ["repo.contract.md", "petey.contract.md"],
+  "toolAllowlist": ["search", "read_file", "list_files", "apply_patch", "run_cmd"],
+  "defaultVerify": ["npm run build", "npm run test", "tsc -b"],
+  "notes": [
+    "Workspace-only access",
+    "Patch-only edits",
+    "Verify when possible"
+  ]
+}
