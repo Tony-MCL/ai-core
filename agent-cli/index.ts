@@ -1,32 +1,44 @@
 // agent-cli/index.ts
-// Minimal runnable CLI scaffold for ai-core.
-// This is intentionally tiny: it proves the repo is buildable and gives us
-// a place to hang commands like index/search/patch later.
-
 import process from "node:process";
+import path from "node:path";
+
+import { indexRepo } from "../core/tools/indexRepo";
+import { searchRepo } from "../core/tools/searchRepo";
+import { readFileSafe } from "../core/tools/readFileSafe";
+import { runVerify } from "../core/tools/runVerify";
 
 type Command =
   | "help"
   | "version"
-  | "doctor";
+  | "doctor"
+  | "index"
+  | "search"
+  | "read"
+  | "verify";
 
 const VERSION = "0.0.1";
 
 function printHelp() {
   console.log(`
-ai-core (MCL) — minimal CLI scaffold
+ai-core (MCL) — CLI scaffold (repo-aware tools)
 
 Usage:
-  npm run ai -- <command>
+  npm run ai -- <command> [args]
 
 Commands:
-  help        Show this help
-  version     Print version
-  doctor      Quick environment sanity check (node version, cwd)
+  help
+  version
+  doctor
+  index                Create .cache/repo-map.json (repo map)
+  search <query>       Search in repo (rg if available, otherwise fallback)
+  read <path>          Read a file safely (size-limited)
+  verify               Run build/typecheck verification if possible
 
 Examples:
-  npm run ai -- help
-  npm run ai -- doctor
+  npm run ai -- index
+  npm run ai -- search "themePacks"
+  npm run ai -- read src/app/App.tsx
+  npm run ai -- verify
 `.trim());
 }
 
@@ -37,21 +49,28 @@ function cmdFromArgs(args: string[]): Command {
   if (raw === "help") return "help";
   if (raw === "version") return "version";
   if (raw === "doctor") return "doctor";
+  if (raw === "index") return "index";
+  if (raw === "search") return "search";
+  if (raw === "read") return "read";
+  if (raw === "verify") return "verify";
   return "help";
 }
 
 function doctor() {
   console.log("ai-core doctor");
+  console.log(`- version: ${VERSION}`);
   console.log(`- node: ${process.version}`);
   console.log(`- platform: ${process.platform} ${process.arch}`);
   console.log(`- cwd: ${process.cwd()}`);
   console.log("");
-  console.log("Next: implement repo indexing + search + patch tools.");
+  console.log("Tools available: index, search, read, verify");
 }
 
-function main() {
+async function main() {
   const args = process.argv.slice(2);
   const cmd = cmdFromArgs(args);
+
+  const rootDir = process.cwd();
 
   switch (cmd) {
     case "help":
@@ -63,10 +82,63 @@ function main() {
     case "doctor":
       doctor();
       return;
+
+    case "index": {
+      const idx = await indexRepo({ rootDir });
+      console.log(`Indexed ${idx.fileCount} files`);
+      console.log(`Wrote: ${path.join(rootDir, ".cache", "repo-map.json")}`);
+      return;
+    }
+
+    case "search": {
+      const query = args[1];
+      if (!query) {
+        console.error("Missing query. Usage: npm run ai -- search <query>");
+        process.exitCode = 2;
+        return;
+      }
+      const { engine, hits } = await searchRepo({ rootDir, query, maxHits: 50 });
+      console.log(`engine: ${engine}`);
+      console.log(`hits: ${hits.length}`);
+      for (const h of hits) {
+        console.log(`${h.file}:${h.line}: ${h.text}`);
+      }
+      return;
+    }
+
+    case "read": {
+      const relPath = args[1];
+      if (!relPath) {
+        console.error("Missing path. Usage: npm run ai -- read <path>");
+        process.exitCode = 2;
+        return;
+      }
+      const r = await readFileSafe({ rootDir, relPath });
+      console.log(`file: ${r.relPath}`);
+      console.log(`bytes: ${r.bytes}${r.truncated ? " (truncated)" : ""}`);
+      console.log("----");
+      console.log(r.content);
+      return;
+    }
+
+    case "verify": {
+      const res = await runVerify(rootDir);
+      if (res.ok) {
+        console.log(`OK: ${res.command}`);
+      } else {
+        console.error(`FAIL: ${res.command} (exit ${res.exitCode})`);
+        process.exitCode = 1;
+      }
+      return;
+    }
+
     default:
       printHelp();
       return;
   }
 }
 
-main();
+main().catch((err) => {
+  console.error(err?.stack || String(err));
+  process.exitCode = 1;
+});
